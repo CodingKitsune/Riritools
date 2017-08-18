@@ -1,0 +1,16 @@
+local gui_mouse_cursor = require("riritools.lua.gui_mouse_cursor")
+local defold_msgs = require("riritools.lua.defold_msgs")
+
+function init(self)
+	msg.post(".", defold_msgs.ACQUIRE_INPUT_FOCUS)
+	self.mouse = gui_mouse_cursor:new("mouse")
+	self.mouse:setup()
+end
+
+function final(self)
+	msg.post(".", defold_msgs.RELEASE_INPUT_FOCUS)
+end
+
+function on_input(self, action_id, action)
+	self.mouse:on_input(action_id, action)
+end

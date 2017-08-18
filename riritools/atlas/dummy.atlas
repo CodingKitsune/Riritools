@@ -1,0 +1,9 @@
+images {
+  image: "/riritools/assets/dummy.png"
+}
+images {
+  image: "/riritools/assets/empty.png"
+}
+margin: 2
+extrude_borders: 0
+inner_padding: 0

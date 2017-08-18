@@ -1,0 +1,179 @@
+local msg_helper = require("riritools.lua.msg_helper")
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local defold_msgs = require("riritools.lua.defold_msgs")
+local save_file_manager = require("riritools.lua.save_file_manager")
+local config_file_manager = require("riritools.lua.config_file_manager")
+local screen_connector_manager = require("riritools.lua.screen_connector_manager")
+local table_utils = require("riritools.lua.table_utils")
+
+local pairs = pairs
+
+local is_ready = false
+local post = msg.post
+
+local make_deep_copy = table_utils.make_deep_copy
+
+local player_init = rt_msgs.PLAYER_INIT
+local got_data = rt_msgs.GOT_DATA
+local got_data_field = rt_msgs.GOT_DATA_FIELD
+local got_config = rt_msgs.GOT_CONFIG
+local got_config_field = rt_msgs.GOT_CONFIG_FIELD
+local changed_data_field = rt_msgs.CHANGED_DATA_FIELD
+local changed_config_field = rt_msgs.CHANGED_CONFIG_FIELD
+local cleanup = rt_msgs.CLEANUP
+
+local function init_player(self)
+	post(".", defold_msgs.ACQUIRE_INPUT_FOCUS)
+	
+	self.__data = {}
+	self.__config = {}
+	self.__warn_data_to = {}
+	self.__warn_config_to = {}
+	
+	self.screen_connector_manager = screen_connector_manager:new()	
+	
+	msg_helper.init(self)
+	
+	msg_helper.add(self, rt_msgs.SAVE_DATA, function(self, message, sender)
+		save_file_manager:save(self.__data, message.filename or "save.data")
+	end)
+	
+	msg_helper.add(self, rt_msgs.LOAD_DATA, function(self, message, sender)
+		save_file_manager:load(self.__data, message.filename or "save.data")
+		post(sender, rt_msgs.LOADED_DATA)
+	end)
+	
+	msg_helper.add(self, rt_msgs.RESET_DATA, function(self, message, sender)
+		save_file_manager:reset(self.__data)
+	end)
+
+	msg_helper.add(self, rt_msgs.GET_DATA, function(self, message, sender)
+		post(sender, got_data, {data=make_deep_copy(self.__data)})
+	end)
+
+	msg_helper.add(self, rt_msgs.SET_DATA_FIELD, function(self, message, sender)
+		self.__data[message.field] = message.value
+		for to_warn, is_set in pairs(self.__warn_data_to[message.field] or {}) do
+			if (is_set) then
+				post(to_warn, changed_data_field, {value=message.value})
+			end
+		end
+	end)
+
+	msg_helper.add(self, rt_msgs.GET_DATA_FIELD, function(self, message, sender)
+		post(sender, got_data_field, {field=message.field, value=self.__data[message.field]})
+	end)	
+	
+	msg_helper.add(self, rt_msgs.SAVE_CONFIG, function(self, message, sender)
+		config_file_manager:save(self.__config, message.filename or "config.data")
+	end)
+	
+	msg_helper.add(self, rt_msgs.LOAD_CONFIG, function(self, message, sender)
+		config_file_manager:load(self.__config, message.filename or "config.data")
+		post(sender, rt_msgs.LOADED_CONFIG)
+	end)
+	
+	msg_helper.add(self, rt_msgs.RESET_CONFIG, function(self, message, sender)
+		config_file_manager:reset(self.__config)
+	end)
+	
+	msg_helper.add(self, rt_msgs.GET_CONFIG, function(self, message, sender)
+		post(sender, got_config, {config = self.__config})
+	end)
+
+	msg_helper.add(self, rt_msgs.SET_CONFIG_FIELD, function(self, message, sender)
+		self.__config[message.field] = message.value
+		for to_warn, is_set in pairs(self.__warn_config_to[message.field] or {}) do
+			if (is_set) then
+				post(to_warn, changed_config_field, {value=message.value})
+			end
+		end
+	end)
+
+	msg_helper.add(self, rt_msgs.GET_CONFIG_FIELD, function(self, message, sender)
+		post(sender, got_config_field, {field=message.field, value=self.__config[message.field]})
+	end)
+
+	msg_helper.add(self, rt_msgs.SET_WARN_CHANGE_CONFIG_FIELD, function(self, message, sender)
+		local field = self.__warn_config_to[message.field] or {}
+		self.__warn_config_to[message.field] = field
+		field[sender] = message.value
+	end)
+
+	msg_helper.add(self, rt_msgs.SET_WARN_CHANGE_DATA_FIELD, function(self, message, sender)
+		local field = self.__warn_data_to[message.field] or {}
+		self.__warn_data_to[message.field] = field
+		field[sender] = message.value
+	end)
+
+	msg_helper.add(self, rt_msgs.CLEANUP, function(self, message, sender)
+		local warn_config_to = {}
+		for k, v in pairs(self.__warn_config_to) do
+			warn_config_to[k] = v
+		end
+		self.__warn_config_to = warn_config_to
+
+		local warn_data_to = {}
+		for k, v in pairs(self.__warn_data_to) do
+			warn_data_to[k] = v
+		end
+		self.__warn_data_to = warn_data_to
+	end)
+
+	save_file_manager:reset(self.__data)
+	config_file_manager:reset(self.__config)
+
+end
+
+function final(self)
+
+	if (not is_ready) then
+		return	
+	end
+	
+	self.screen_connector_manager:final(self)
+	post(".", defold_msgs.RELEASE_INPUT_FOCUS)
+end
+
+function update(self, dt)
+
+	if (not is_ready) then
+		return	
+	end
+
+	self.screen_connector_manager:update(self, dt)
+end
+
+function on_message(self, message_id, message, sender)
+	
+	if (message_id == player_init) then
+		is_ready = true
+		init_player(self)
+		post(sender, rt_msgs.PLAYER_INIT_DONE)	
+	end
+	
+	if (not is_ready) then
+		return	
+	end
+	
+	msg_helper.on_message(self, message_id, message, sender, self)
+    self.screen_connector_manager:on_message(self, message_id, message, sender)
+end
+
+function on_input(self, action_id, action)
+	
+	if (not is_ready) then
+		return	
+	end
+	
+	self.screen_connector_manager:on_input(self, action_id, action)
+end
+
+function on_reload(self)
+	
+	if (not is_ready) then
+		return	
+	end
+	
+	self.screen_connector_manager:on_reload(self)
+end

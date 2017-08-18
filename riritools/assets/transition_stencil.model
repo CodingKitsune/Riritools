@@ -1,0 +1,7 @@
+mesh: "/riritools/assets/transition_stencil.dae"
+material: "/riritools/material/transition_stencil.material"
+textures: "/builtins/graphics/particle_blob.png"
+skeleton: ""
+animations: ""
+default_animation: ""
+name: "quad"

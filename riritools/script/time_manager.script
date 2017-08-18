@@ -1,0 +1,9 @@
+local chronometer = require("riritools.lua.delayed_function")
+local chronometer_update = chronometer.static.auto_update_function
+local delayed_function = require("riritools.lua.chronometer")
+local delayed_function_update = delayed_function.static.auto_update_function
+
+function update(_, dt)
+	chronometer_update(dt)
+	delayed_function_update(dt)
+end

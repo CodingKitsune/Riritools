@@ -1,0 +1,84 @@
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local d_msgs = require("riritools.lua.defold_msgs")
+local define_transitions = require("riritools.lua.define_transitions")
+
+local FADE_OUT_OFFSET = 1
+local FADE_IN_OFFSET = 0
+local BASE_OFFSET = vmath.vector4(0, 1, 1, 1)
+local current_offset = vmath.vector4(0, 1, 1, 1)
+local has_reply_to = false
+
+local transition_out = rt_msgs.TRANSITION_OUT
+local transition_out_done = rt_msgs.TRANSITION_OUT_DONE
+local transition_in = rt_msgs.TRANSITION_IN
+local transition_in_done = rt_msgs.TRANSITION_IN_DONE
+local set_constant = sprite.set_constant
+
+local enable = d_msgs.ENABLE
+local disable = d_msgs.DISABLE
+local needs_disabling = true
+
+go.property("offset", 0)
+
+local function set_stencil(self, name)
+	set_constant(self.__component_url, "offset", BASE_OFFSET)
+	msg.post(self.__component_url, disable)
+    self.name = name
+    self.component_name = "#"..self.name
+    self.texture_name = "stencil_"..self.name
+    self.__component_url = msg.url("main:/transitions"..self.component_name)
+    msg.post(self.__component_url, enable)
+    set_constant(self.__component_url, "offset", current_offset)
+end
+
+function init(self)
+    self.name = ""
+    self.texture_name = ""
+    self.default_transition = "dummy_transition"
+    self.component_name = "#"..self.default_transition
+    self.__component_url = msg.url("main:/transitions"..self.component_name)
+    has_reply_to = false
+    set_stencil(self, self.default_transition)
+end
+
+function update(self)
+	if (needs_disabling) then
+		for _, transition in ipairs(define_transitions.get_all()) do
+			if (self.name ~= transition) then
+				msg.post(msg.url("main:/transitions#"..transition), disable)
+			end
+		end
+		needs_disabling = false
+	end
+	if (has_reply_to and self.status == FADE_IN_OFFSET and self.offset == FADE_OUT_OFFSET) then
+		msg.post(self.to_reply, transition_in_done, self.reply_with)
+		has_reply_to = false
+    elseif (has_reply_to and self.status == FADE_OUT_OFFSET and self.offset == FADE_IN_OFFSET) then
+		msg.post(self.to_reply, transition_out_done, self.reply_with)
+		has_reply_to = false
+    end
+    current_offset.x = self.offset
+    set_constant(self.__component_url, "offset", current_offset)
+end
+
+function on_message(self, message_id, message, sender)
+	if (message_id == transition_in and self.offset == FADE_IN_OFFSET) then
+		set_stencil(self, message.transition or self.default_transition)
+		go.animate("#", "offset", go.PLAYBACK_ONCE_FORWARD, FADE_OUT_OFFSET, go.EASING_LINEAR, message.time or 0.02, 0)
+		if (message.reply) then
+			has_reply_to = true
+			self.to_reply = sender
+			self.reply_with = message.parameters or {}
+		end
+		self.status = FADE_IN_OFFSET
+	elseif (message_id == transition_out and self.offset == FADE_OUT_OFFSET) then
+		set_stencil(self, message.transition or self.default_transition)
+		go.animate("#", "offset", go.PLAYBACK_ONCE_FORWARD, FADE_IN_OFFSET, go.EASING_LINEAR, message.time or 0.02, 0)
+		if (message.reply) then
+			has_reply_to = true
+			self.to_reply = sender
+			self.reply_with = message.parameters or {}
+		end
+		self.status = FADE_OUT_OFFSET
+	end
+end

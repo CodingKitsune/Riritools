@@ -1,0 +1,389 @@
+local queue = require("riritools.lua.queue")
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local defold_msgs = require("riritools.lua.defold_msgs")
+local msg_helper = require("riritools.lua.msg_helper")
+local proxy_utils = require("riritools.lua.proxy_utils")
+local is_ready = false
+
+local function is_level_loaded(self, level_name)
+    return self.levels:has_item(level_name)
+end
+    
+local function is_level_enabled(self, level_name)
+    level_name = level_name or self.levels:first()
+    for key, value in pairs(self.enabled_levels) do
+        if (key == level_name) then
+            return (value == true)
+        end
+    end
+    return false
+end
+    
+local function is_level_paused(self, level_name)
+    level_name = level_name or self.levels:first()
+    for key, value in pairs(self.paused_levels) do
+        if (key == level_name) then
+            return (value == 0)
+        end
+    end
+    return false
+end
+
+local function init_level_manager(self)
+    self.can_proceed = true
+    self.todo = queue:new()
+    self.levels = queue:new()
+    self.enabled_levels = {}
+    self.paused_levels = {}
+    self.level_time_steps = {}
+    self.loading_level = false
+    self.loading_level_parameters = false
+    self.reply_to = false
+    self.warn_changes_to = {}
+    
+    msg_helper.init(self)
+    
+    msg_helper.add(self, rt_msgs.PUSH_LEVEL, function(self, message, sender)
+        local params = {
+            level = message.level, 
+            params = message.params
+        }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (not is_level_loaded(self, params.level)) then
+                msg.post(proxy_utils.get_proxy_from_level(params.level), defold_msgs.ASYNC_LOAD)
+                self.loading_level = params.level
+                self.loading_level_parameters = params.params
+                self.reply_to = params.reply_to
+            else
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, defold_msgs.PROXY_LOADED, function(self, message, sender)
+        msg.post(sender, defold_msgs.ENABLE)
+        msg.post(sender, defold_msgs.ACQUIRE_INPUT_FOCUS)
+        if (self.reply_to) then
+            msg.post(self.reply_to, rt_msgs.PUSHED_LEVEL, {level=self.loading_level})
+        end
+        for key, value in pairs(self.warn_changes_to) do
+            if (value) then
+                msg.post(key, rt_msgs.PUSHED_LEVEL, {level=self.loading_level})
+            end
+        end    
+        if (self.loading_level_parameters) then
+            msg.post(proxy_utils.get_initializer_from_level(self.loading_level), rt_msgs.GOT_LEVEL_PARAMETERS, self.loading_level_parameters)
+        end
+        
+        self.enabled_levels[self.loading_level] = true
+        self.level_time_steps[self.loading_level] = {1.0, 0}
+        
+        msg.post(sender, defold_msgs.SET_TIME_STEP, {
+            factor=self.level_time_steps[self.loading_level][1],
+            mode=self.level_time_steps[self.loading_level][2]
+        })
+        
+        self.levels:push(self.loading_level)
+        self.loading_level = nil
+        self.loading_level_parameters = nil
+        self.can_proceed = true
+    end)
+    
+    msg_helper.add(self, rt_msgs.POP_LEVEL, function(self, message, sender)
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (self.levels:size() > 0) then
+                self.enabled_levels[self.levels:first()] = nil
+                self.level_time_steps[self.levels:first()] = nil
+                msg.post(proxy_utils.get_proxy_from_level(self.levels:first()), defold_msgs.UNLOAD)
+            end
+            self.reply_to = params.reply_to
+        end, params})
+    end)
+    
+     msg_helper.add(self, rt_msgs.POP_ALL_LEVELS, function(self, message, sender)
+        for _, level in pairs(self.levels:get_raw_data()) do
+            if (level) then
+                self.messages[rt_msgs.POP_LEVEL](self, {}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                msg.post(params.reply_to, rt_msgs.POPPED_ALL_LEVELS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    msg.post(key, rt_msgs.POPPED_ALL_LEVELS)
+                end
+            end
+            self.can_proceed = true
+        end, params})
+    end)
+    
+    msg_helper.add(self, defold_msgs.PROXY_UNLOADED, function(self, message, sender)
+        local level = self.levels:first()
+        self.levels:pop()
+        if (self.reply_to) then
+            msg.post(self.reply_to, rt_msgs.POPPED_LEVEL, {level=level})
+        end
+        for key, value in pairs(self.warn_changes_to) do
+            if (value) then
+                msg.post(key, rt_msgs.POPPED_LEVEL, {level=level})
+            end
+        end    
+        self.can_proceed = true
+        collectgarbage("step", 1)
+    end)
+    
+    msg_helper.add(self, rt_msgs.ENABLE_LEVEL, function(self, message, sender)
+        local params = { level = message.level }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (is_level_loaded(self, params.level) and not is_level_enabled(self, params.level)) then
+                msg.post(proxy_utils.get_proxy_from_level(params.level), defold_msgs.ENABLE)
+                self.enabled_levels[params.level] = true
+            end
+            if (params.reply_to) then
+                msg.post(params.reply_to, rt_msgs.ENABLED_LEVEL, {level=params.level})
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    msg.post(key, rt_msgs.ENABLED_LEVEL, {level=params.level})
+                end
+            end 
+            self.can_proceed = true
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.DISABLE_LEVEL, function(self, message, sender)
+        local params = { level = message.level }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (is_level_loaded(self, params.level) and is_level_enabled(self, params.level)) then
+                pprint("DISABLED!")
+                msg.post(proxy_utils.get_proxy_from_level(params.level), defold_msgs.DISABLE)
+                self.enabled_levels[params.level] = false
+                if (params.reply_to) then
+                    msg.post(params.reply_to, rt_msgs.DISABLED_LEVEL, {level=params.level})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        msg.post(key, rt_msgs.DISABLED_LEVEL, {level=params.level})
+                    end
+                end 
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.PAUSE_LEVEL, function(self, message, sender)
+        local params = {level = message.level or self.levels:first()}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)          
+            if (is_level_loaded(self, params.level) and is_level_enabled(self, params.level)) then
+                msg.post(proxy_utils.get_proxy_from_level(params.level), defold_msgs.SET_TIME_STEP, {
+                    factor=0.0000000000001,
+                    mode=self.level_time_steps[params.level][2]
+                })
+                if (params.reply_to) then
+                    msg.post(params.reply_to, rt_msgs.PAUSED_LEVEL, {level=params.level})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        msg.post(key, rt_msgs.PAUSED_LEVEL, {level=params.level})
+                    end
+                end 
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.PAUSE_ALL_LEVELS, function(self, message, sender)
+        for _, level in pairs(self.levels:get_raw_data()) do
+            if (level) then
+                self.messages[rt_msgs.PAUSE_LEVEL](self, {level=level}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                msg.post(params.reply_to, rt_msgs.PAUSED_ALL_LEVELS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    msg.post(key, rt_msgs.PAUSED_ALL_LEVELS)
+                end
+            end 
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.RESUME_LEVEL, function(self, message, sender)
+        local params = {level = message.level or self.levels:first()}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (is_level_loaded(self, params.level) and is_level_enabled(self, params.level)) then
+                msg.post(proxy_utils.get_proxy_from_level(params.level), defold_msgs.SET_TIME_STEP, {
+                    factor=self.level_time_steps[params.level][1],
+                    mode=self.level_time_steps[params.level][2]
+                })
+                if (params.reply_to) then
+                    msg.post(params.reply_to, rt_msgs.RESUMED_LEVEL, {level=params.level})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        msg.post(key, rt_msgs.RESUMED_LEVEL, {level=params.level})
+                    end
+                end 
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+     msg_helper.add(self, rt_msgs.RESUME_ALL_LEVELS, function(self, message, sender)
+        for _, level in pairs(self.levels:get_raw_data()) do
+            if (level) then
+                self.messages[rt_msgs.RESUME_LEVEL](self, {level=level}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                msg.post(params.reply_to, rt_msgs.RESUME_ALL_LEVELS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    msg.post(key, rt_msgs.RESUME_ALL_LEVELS)
+                end
+            end 
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.SET_LEVEL_TIME_STEP, function(self, message, sender)
+        local params = {level = message.level or self.levels:first()}
+        self.todo:push({function(self, params)
+            if (is_level_loaded(self, params.level) and is_level_enabled(self, params.level)) then
+                self.level_time_steps[params.level][1] = params.frequency
+                self.level_time_steps[params.level][2] = params.mode
+                msg.post(proxy_utils.get_proxy_from_level(params.level), defold_msgs.SET_TIME_STEP, {
+                    factor=self.level_time_steps[params.level][1],
+                    mode=self.level_time_steps[params.level][2]
+                })
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.GET_LEVEL_TIME_STEP, function(self, message, sender)
+        local level = message.level or self.levels:first()
+        if (is_level_loaded(self, level) and is_level_enabled(self, level)) then
+            local time_step = {
+                factor=self.level_time_steps[params.level][1],
+                mode=self.level_time_steps[params.level][2],
+            }
+            msg.post(sender, rt_msgs.GOT_LEVEL_TIME_STEP, time_step)
+        end
+    end)
+    
+    msg_helper.add(self, rt_msgs.GET_ACTIVE_LEVELS, function(self, message, sender)
+        msg.post(sender, rt_msgs.GOT_ACTIVE_LEVELS, {levels=self.levels:get_raw_data()})
+    end)
+    
+    msg_helper.add(self, rt_msgs.WARN_LEVEL_CHANGES, function(self, message, sender)
+        self.warn_changes_to[sender] = true
+    end)
+  
+    msg_helper.add(self, rt_msgs.RESTART_LEVEL, function(self, message, sender)
+        local params = {level = message.level or self.levels:first()}
+        if (message.reply or message.reply_to) then
+            reply_to = message.reply_to or sender
+        end
+        if (params.level) then
+            self.messages[rt_msgs.POP_LEVEL](self, {level=params.level}, sender)
+            self.messages[rt_msgs.PUSH_LEVEL](self, {level=params.level}, sender)
+            self.todo:push({function(self, params)
+                if (params.reply_to) then
+                    msg.post(params.reply_to, rt_msgs.RESTARTED_LEVEL, {level=params.level})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        msg.post(key, rt_msgs.RESTARTED_LEVEL)
+                    end
+                end
+            end, params})
+        end 
+    end)
+    
+    msg_helper.add(self, rt_msgs.RESTART_ALL_LEVELS, function(self, message, sender)
+        for _, level in pairs(self.levels:get_raw_data()) do
+            if (level) then
+                self.messages[rt_msgs.RESTART_LEVEL](self, {level=level}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                msg.post(params.reply_to, rt_msgs.RESTARTED_ALL_LEVELS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    msg.post(key, rt_msgs.RESTARTED_ALL_LEVELS)
+                end
+            end 
+        end, params})
+    end)
+end
+
+function update(self, dt)
+    
+    if (not is_ready) then
+        return  
+    end
+    
+    if (self.can_proceed and self.todo:size() > 0) then
+        local func_todo = self.todo:pop()
+        self.can_proceed = false
+        func_todo[1](self, func_todo[2])
+    end
+end
+
+function on_message(self, message_id, message, sender)
+    
+    if (message_id == rt_msgs.LEVEL_MANAGER_INIT) then
+        is_ready = true
+        init_level_manager(self)
+        msg.post(sender, rt_msgs.LEVEL_MANAGER_INIT_DONE)   
+    end
+    
+    if (not is_ready) then
+        return  
+    end
+    
+    msg_helper.on_message(self, message_id, message, sender)
+end

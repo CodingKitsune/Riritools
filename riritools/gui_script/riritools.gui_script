@@ -1,0 +1,15 @@
+local gui_log = require("riritools.lua.gui_log")
+
+function init(self)
+	gui.set_render_order(15)
+	self.gui_log = gui_log:new("log")
+	self.gui_log:setup()
+end
+
+function update(self, dt)
+	self.gui_log:update(dt)
+end
+
+function on_message(self, message_id, message, sender)
+	self.gui_log:on_message(message_id, message, sender)
+end

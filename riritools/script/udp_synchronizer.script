@@ -1,0 +1,443 @@
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local repository = require("riritools.lua.synchronizer_repository")
+local socket = require("builtins.scripts.socket")
+local string_utils = require("riritools.lua.string_utils")
+local table_utils = require("riritools.lua.table_utils")
+local delayed_function = require("riritools.lua.delayed_function")
+
+local cconcat = table.concat
+local split_f = string_utils.split_f
+local ctonumber = tonumber
+local cunpack = unpack
+local cabs = math.abs
+local cvector3 = vmath.vector3
+local cvector4 = vmath.vector4
+local linear_find = table_utils.linear_find
+
+go.property("update_frequency", 5)
+go.property("response_frequency", 5)
+go.property("synchronizer_id", 1)
+go.property("is_slave", 0)
+go.property("synchronization_port", 50001)
+go.property("responses_port", 50002)
+go.property("disconnect_time", 3)
+
+local enable_synchronizer = rt_msgs.ENABLE_SYNCHRONIZER
+local disable_synchronizer = rt_msgs.DISABLE_SYNCHRONIZER
+local register_slave = rt_msgs.REGISTER_SLAVE
+local register_master = rt_msgs.REGISTER_MASTER
+
+function init(self)
+    self.__is_enabled = true
+    self.__counter_update = 0
+    self.__counter_response = 0
+    self.__repository = nil
+    self.__disconnect_functions = {}
+    self.__synchro_coroutine_data = {
+        socket = nil,
+        to_send = {},
+        target = nil,
+        port = nil,
+        running = true,
+        repository = nil,
+        parsed_fields = {{}},
+        split_func = nil,
+        is_available = true,
+        disconnect_functions = self.__disconnect_functions,
+    }
+    self.__responses_coroutine_data = {
+        socket = nil,
+        target = nil,
+        port = nil,
+        running = true,
+        repository = nil,
+        parsed_fields = {{}},
+        split_func = nil,
+        is_available = true,
+        disconnect_functions = self.__disconnect_functions,
+    }
+    self.__synchro_coroutine = nil
+    self.__responses_coroutine = nil
+
+    local synchro_fields = self.__synchro_coroutine_data.parsed_fields
+    self.__synchro_coroutine_data.split_func = function(c)
+        synchro_fields[1][#synchro_fields[1]+1] = c
+    end
+
+    local response_fields = self.__responses_coroutine_data.parsed_fields
+    self.__responses_coroutine_data.split_func = function(c)
+        response_fields[1][#response_fields[1]+1] = c
+    end
+end
+
+function final(self)
+    repository.reset(self.synchronizer_id)
+    self.__synchro_coroutine_data.running = false
+    self.__responses_coroutine_data.running = false
+    if (self.__synchro_coroutine_data.socket)  then
+        self.__synchro_coroutine_data.socket:close()
+    end
+    if (self.__responses_coroutine_data.socket)  then
+        self.__responses_coroutine_data.socket:close()
+    end
+end
+
+local function send_response_coroutine(data)
+    local yield = coroutine.yield
+    local concat = cconcat
+    local batch_size = 0
+    local responses, send_socket, ip, port, response, response_type, value, buffer, value_string, batch, to_send
+    while (data.running) do
+        data.is_available = false
+        responses = responses or data.repository.responses
+        send_socket = data.socket
+        ip = data.target
+        port = data.port
+        batch = {}
+        to_send = {}
+        for i = 1, #responses do
+            response = responses[i]
+            response_type = response[5]
+            if (response_type == 0 or response_type == 1) then --NUMBER OR STRING
+                value = response[2]
+            elseif (response_type == 2) then --VECTOR3
+                buffer = response[2]
+                value = concat({buffer.x, ",", buffer.y, ",", buffer.z})
+            elseif (response_type == 3) then --VECTOR4
+                buffer = response[2]
+                value = concat({buffer.x, ",", buffer.y, ",", buffer.z})
+            end
+            --1@value@time_stamp
+            value_string = concat({i, "@", value or 0, "@", response[1], "@"})
+            if (#value_string + batch_size > 150) then
+                to_send[#to_send + 1] = concat(batch)
+                batch_size = #value_string
+                batch = {value_string}
+            else
+                batch_size = batch_size + #value_string
+                batch[#batch+1] = value_string
+            end
+        end
+        if (#batch > 0) then
+             to_send[#to_send + 1] = concat(batch)
+        end
+        for i=1, #to_send do
+            send_socket:sendto(to_send[i], ip, port)
+        end
+        data.is_available = true
+        yield()
+    end
+end
+
+local function treat_response_data(data, data_received, ip)
+    local tonumber = ctonumber
+    local unpack = cunpack
+    local vector4 = cvector4
+    local vector3 = cvector3
+    local split_func = data.split_func
+    local repo, parsed_fields, parsed_data, response, time_stamp, res_type, value
+    data.disconnect_functions[ip]:restart()
+    parsed_fields = data.parsed_fields
+    parsed_fields[1] = {}
+    split_f(data_received, "@", split_func)
+    parsed_data = parsed_fields[1]
+    if (#parsed_data % 3 == 0) then
+        for i=0, (#parsed_data - 1), 3 do
+            repo = data.repository
+            response = repo.responses[tonumber(parsed_data[i+1])]
+            time_stamp = tonumber(parsed_data[i+3])
+            if (response and (response[1] < time_stamp)) then
+                res_type = response[5]
+                value = nil
+                if (res_type == 0) then
+                    value = tonumber(parsed_data[i+2])
+                elseif (res_type == 1) then
+                    value = parsed_data[i+2]
+                elseif (res_type == 2) then
+                    parsed_fields[1] = {}
+                    split_f(parsed_data[i+2], ",", split_func)
+                    value = vector3(unpack(parsed_fields[1]))
+                elseif (res_type == 3) then
+                    parsed_fields[1] = {}
+                    split_f(parsed_data[i+2], ",", split_func)
+                    value = vector4(unpack(parsed_fields[1]))
+                end
+                response[1] = time_stamp
+                response[2] = value
+                response[3](value, response[4])
+            end
+        end
+    end
+end
+
+local function receive_response_coroutine(data)
+    local yield = coroutine.yield
+    local receive_socket, data_received, ip
+    while (data.running) do
+        data.is_available = false
+        receive_socket = receive_socket or data.socket
+        data_received, ip = receive_socket:receivefrom()
+        if (data_received and linear_find(data.target or {}, ip)) then
+            pcall(treat_response_data, data, data_received, ip)
+        end
+        data.is_available = true
+        yield()
+    end
+end
+
+local function send_order_coroutine(data)
+    local yield = coroutine.yield
+    local ip, to_send, send_socket, port
+    while (data.running) do
+        data.is_available = false
+        to_send = data.to_send
+        send_socket = data.socket
+        port = data.port
+        for i =1, #data.target do
+            ip = data.target[i]
+            for j=1, #to_send do
+                send_socket:sendto(to_send[j], ip, port)
+            end
+        end
+
+        data.is_available = true
+        yield()
+    end
+end
+
+local function treat_order_data(data, data_received, ip)
+    local parsed_data, obj_id, object, repo, parsed_fields, property, ptype, otype, fac
+    local tonumber = ctonumber
+    local unpack = cunpack
+    local vector4 = cvector4
+    local vector3 = cvector3
+    local split_func = data.split_func
+    data.disconnect_functions[ip]:restart()
+    repo = data.repository
+    parsed_fields = data.parsed_fields
+    parsed_fields[1] = {}
+    split_f(data_received, "@", split_func)
+    parsed_data = parsed_fields[1]
+
+    if (#parsed_data % 5 == 0) then
+        for i=0, (#parsed_data - 1), 5 do
+            obj_id = tonumber(parsed_data[i+2])
+            object = repo.objects[obj_id]
+            otype = repo.types[tonumber(parsed_data[i+1])]
+            if (object) then
+                property = otype[1][tonumber(parsed_data[i+3])]
+                ptype = property and property.type
+                if (ptype == 0) then --NUMBER
+                    property.set(object[1], tonumber(parsed_data[i+4]))
+                elseif (ptype == 1) then --STRING
+                    property.set(object[1], parsed_data[i+4])
+                elseif (ptype == 2) then --VECTOR3
+                    parsed_fields[1] = {}
+                    split_f(parsed_data[i+4], ",", split_func)
+                    property.set(object[1], vector3(unpack(parsed_fields[1])))
+                elseif (ptype == 3) then --VECTOR4
+                    parsed_fields[1] = {}
+                    split_f(parsed_data[i+4], ",", split_func)
+                    property.set(object[1], vector4(unpack(parsed_fields[1])))
+                end
+            else
+                fac = repo.factories[otype[2]]
+                if (otype[3]) then
+                    otype[3](factory.create(fac, nil, nil, {sync_id=obj_id}), parsed_data[i+5])
+                else
+                    factory.create(fac, nil, nil, {sync_id=obj_id})
+                end
+            end
+        end
+    end
+end
+
+local function receive_order_coroutine(data)
+    local receive_socket, data_received, ip
+    local yield = coroutine.yield
+    while (data.running) do
+        data.is_available = false
+        receive_socket = data.socket
+        data_received, ip = receive_socket:receivefrom()
+        if (data_received and ip == data.target) then
+			pcall(treat_order_data, data, data_received, ip)
+        end
+        data.is_available = true
+        yield()
+    end
+end
+
+local function order(self)
+    local concat = cconcat
+    local abs = cabs
+    local objects = self.__repository.objects
+    local types = self.__repository.types
+    local to_send = {}
+    local batch = {}
+    local batch_size = 0
+    local object, properties, property, property_type, value, value_string, last_value, c, d, tolerance, send_string
+    for k=1, #objects do
+        object = objects[k]
+        properties = types[object[2]][1]
+        if (object) then
+            for i=1, #properties do
+                property = properties[i]
+                value = property.get(object[1])
+                last_value = object[3][i]
+                property_type = property.type
+                if ((property_type >=0 and property_type <= 3) and value ~= last_value) then
+                    tolerance = true
+                    if (last_value) then
+                        if (property_type == 0) then
+                            tolerance = (abs(value - last_value) >= (property.tolerance or 0))
+                        elseif (property_type == 2) then
+                            c = value - last_value
+                            c.x = abs(c.x)
+                            c.y = abs(c.y)
+                            c.z = abs(c.z)
+                            d = property.tolerance or cvector3(0)
+                            tolerance = (c.x >= d.x and c.y >= d.y and c.z >= d.z)
+                        elseif (property_type == 3) then
+                            c = value - last_value
+                            c.x = abs(c.x)
+                            c.y = abs(c.y)
+                            c.z = abs(c.z)
+                            c.w = abs(c.w)
+                            d = property.tolerance or cvector4(0)
+                            tolerance = (c.x >= d.x and c.y >= d.y and c.z >= d.z and c.w >= d.w)
+                        end
+                    else
+                        object[3][i] = value
+                    end
+                    if (tolerance) then
+                        object[3][i] = value
+                        if (property_type == 0 or property_type == 1) then --NUMBER OR STRING
+                            value_string = value
+                        elseif (property_type == 2) then --VECTOR3
+                            value_string = concat({value.x, ",", value.y, ",", value.z})
+                        elseif (property_type == 3) then --VECTOR4
+                            value_string = concat({value.x, ",", value.y, ",", value.z, ",", value.w})
+                        end
+                        send_string = concat({object[2], "@", k, "@", i, "@", value_string, "@", object[4] or " ", "@"})
+                        if (#send_string + batch_size > 150) then
+                            to_send[#to_send + 1] = concat(batch)
+                            batch_size = #send_string
+                            batch = {send_string}
+                        else
+                            batch_size = batch_size + #send_string
+                            batch[#batch+1] = send_string
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if (#batch > 0) then
+         to_send[#to_send + 1] = concat(batch)
+    end
+    if (#to_send > 0) then
+        self.__synchro_coroutine_data.to_send = to_send
+        self.__synchro_coroutine(self.__synchro_coroutine_data)
+    end
+end
+
+function update(self, dt)
+    local repo = self.__repository
+    if (not repo) then
+        repo = repository.get(self.synchronizer_id)
+        self.__repository = repo
+        self.__synchro_coroutine_data.repository = repo
+        self.__responses_coroutine_data.repository = repo
+    else
+        self.__counter_update = self.__counter_update + 1
+        self.__counter_response = self.__counter_response + 1
+        if (self.__counter_update > self.update_frequency) then
+            self.__counter_update = 0
+            if (self.__is_enabled and self.__synchro_coroutine and self.is_slave == 0
+                and self.__synchro_coroutine_data.is_available) then
+                    order(self)
+            end
+        end
+        if (self.is_slave == 1 and self.__synchro_coroutine_data.is_available) then
+            self.__synchro_coroutine(self.__synchro_coroutine_data)
+        end
+
+        if (self.__counter_response > self.response_frequency
+            and self.__responses_coroutine and self.__responses_coroutine_data.is_available) then
+                self.__counter_response = 0
+                self.__responses_coroutine(self.__responses_coroutine_data)
+        end
+
+        if (self.__synchro_coroutine_data.target or self.__responses_coroutine_data.target) then
+			for _, dfunction in pairs(self.__disconnect_functions) do
+				dfunction:update(dt)
+			end
+        end
+    end
+    if (repo) then
+        repo.type = self.is_slave
+        repo.active = self.__is_enabled
+    end
+end
+
+local function make_coroutine_and_socket(self, is_sending)
+    if (not self.__synchro_coroutine) then
+        local new_socket = socket.udp()
+        new_socket:setsockname("*", self.synchronization_port)
+        new_socket:settimeout(0)
+        self.__synchro_coroutine_data.socket = new_socket
+        self.__synchro_coroutine_data.port = self.synchronization_port
+
+        new_socket = socket.udp()
+        new_socket:setsockname("*", self.responses_port)
+        new_socket:settimeout(0)
+        self.__responses_coroutine_data.socket = new_socket
+        self.__responses_coroutine_data.port = self.responses_port
+
+        if (is_sending) then
+            self.__synchro_coroutine = coroutine.wrap(send_order_coroutine)
+            self.__responses_coroutine = coroutine.wrap(receive_response_coroutine)
+        else
+            self.__synchro_coroutine = coroutine.wrap(receive_order_coroutine)
+            self.__responses_coroutine = coroutine.wrap(send_response_coroutine)
+        end
+    end
+end
+
+local function on_disconnect(args)
+	local synchro = args[1]
+	if (synchro.__repository) then
+		local dfunc = synchro.__repository.disconnect_func
+		if (dfunc) then
+			dfunc[1](args[2], dfunc[2])
+		end
+	end
+end
+
+function on_message(self, message_id, message)
+    if (message_id == enable_synchronizer) then
+        self.__is_enabled = true
+    elseif (message_id == disable_synchronizer) then
+        self.__is_enabled = false
+    elseif (message_id == register_slave) then
+        if (self.is_slave == 0) then
+            make_coroutine_and_socket(self, true)
+            local target = self.__synchro_coroutine_data.target or {}
+            self.__synchro_coroutine_data.target = target
+            self.__responses_coroutine_data.target = target
+            target[#target + 1] = message.ip
+            local dfunction = delayed_function:new(self.disconnect_time, on_disconnect, {self, message.ip})
+            dfunction:restart()
+            self.__disconnect_functions[message.ip] = dfunction
+        end
+    elseif (message_id == register_master) then
+        if (self.is_slave == 1) then
+            make_coroutine_and_socket(self, false)
+            self.__synchro_coroutine_data.target = message.ip
+            self.__responses_coroutine_data.target = message.ip
+            local dfunction = delayed_function:new(self.disconnect_time, on_disconnect, {self, message.ip})
+            dfunction:restart()
+            self.__disconnect_functions[message.ip] = dfunction
+        end
+    end
+end

@@ -1,0 +1,255 @@
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local rt_urls = require("riritools.lua.riritools_urls")
+local defold_msgs = require("riritools.lua.defold_msgs")
+local gui_button = require("riritools.lua.gui_button")
+local gui_bar = require("riritools.lua.gui_bar")
+local gui_draggable_bar = require("riritools.lua.gui_draggable_bar")
+local gui_checkbox = require("riritools.lua.gui_checkbox")
+local gui_helper = require("riritools.lua.gui_helper")
+local live_number = require("riritools.lua.gui_live_number")
+local live_text = require("riritools.lua.gui_live_text")
+local linear_animator = require("riritools.lua.linear_animator")
+local chronometer = require("riritools.lua.chronometer")
+local delayed_function = require("riritools.lua.delayed_function")
+local gui_window = require("riritools.lua.gui_window")
+local rt_inputs = require("riritools.lua.riritools_inputs")
+local rest_consumer = require("riritools.lua.rest_consumer")
+local queue = require("riritools.lua.queue")
+local stack = require("riritools.lua.stack")
+local gui_slideshow = require("riritools.lua.gui_slideshow")
+local gui_text_popup_generator = require("riritools.lua.gui_text_popup_generator")
+local gui_link = require("riritools.lua.gui_link")
+local gui_slider = require("riritools.lua.gui_slider")
+
+local gui_toggleable_button = require("riritools.lua.gui_toggleable_button")
+
+local simple_equation_solver = require("riritools.lua.simple_equation_solver")
+local equations = require("riritools.lua.equations")
+
+local log = require("riritools.lua.log")
+
+function init(self)
+	msg.post(".", defold_msgs.ACQUIRE_INPUT_FOCUS)
+	self.button_reset = gui_button:new("button_reset")
+	self.button_reset:setup()
+	self.button_reset.pressed_function_args = self	
+	self.button_reset.pressed_function = function(self)
+		self.bar.value = 0
+		self.animated_value = 0
+		self.bar:refresh()
+		self.button_shake.pressed_function(self)
+	end
+
+	self.button_add = gui_button:new("button_add")
+	self.button_add:setup()
+	self.button_add.pressed_function_args = self	
+	self.button_add.pressed_function = function(obj)
+		self.bar.value = self.bar.value + 25
+		self.animated_value = self.animated_value + 25
+		self.bar:refresh()
+	end
+	
+	self.button_shake = gui_button:new("button_shake")
+	self.button_shake:setup({translate=true})
+	self.button_shake.pressed_function_args = self	
+	self.button_shake.pressed_function = function(obj)
+		gui_helper.zoom_bounce_gui_component(obj, obj.bar, 0.3, 0.1, 0.2, 3)
+		gui_helper.shake_gui_component(obj, obj.bar_animated, 10, 0.1, 8)
+		gui_helper.shake_gui_component(obj, obj.live_number, 5, 0.1, 6)
+
+		msg.post(rt_urls.LEVEL_MANAGER, rt_msgs.PAUSE_LEVEL)
+		msg.post(rt_urls.GO_PLAYER, rt_msgs.SAVE_CONFIG)
+	end
+
+	self.toggleable_button = gui_toggleable_button:new("toggleable_button")
+	self.toggleable_button:setup()
+	self.toggleable_button:add_state({
+		text = "STATE 1",
+		normal_color = vmath.vector4(1, 0.5, 0.5, 1)
+	})
+	self.toggleable_button:add_state({
+		text = "STATE 2",
+		normal_color = vmath.vector4(0, 0.5, 0.5, 1)
+	})
+
+	self.link = gui_link:new("link")
+	self.link:setup()
+	self.link.pressed_function = function(obj)
+		pprint("LINK PRESSED!")
+	end
+
+	self.bar = gui_bar:new("bar")
+	self.bar:setup()
+	self.bar.value = 0
+	self.bar.max_value = 200
+	self.bar:refresh()
+	
+	self.bar_animated = gui_bar:new("bar_animated")
+	self.bar_animated:setup()
+	self.bar_animated.target = self
+	self.animated_value = 0
+	self.animated_max_value = 200
+	self.bar_animated.get_max_value_function = function(target)
+		return target.animated_max_value
+	end	
+	self.bar_animated.get_value_function = function(target)
+		return target.animated_value
+	end
+
+	self.draggable_bar = gui_draggable_bar:new("draggable_bar")
+	self.draggable_bar:setup()
+	self.draggable_bar.difference_speed = 0.1
+	self.draggable_bar.target = self
+	self.draggable_bar.get_max_value_function = function(target)
+		return target.animated_max_value
+	end	
+	self.draggable_bar.get_value_function = function(target)
+		return target.animated_value
+	end
+	self.draggable_bar.set_value_function = function(target, value)
+		target.animated_value = value
+	end
+
+
+
+	self.slider = gui_slider:new("slider")
+	self.slider:setup()
+	self.slider.difference_speed = 0.1
+	self.slider.target = self
+	self.slider.get_max_value_function = function(target)
+		return target.animated_max_value
+	end	
+	self.slider.get_value_function = function(target)
+		return target.animated_value
+	end
+	self.slider.set_value_function = function(target, value)
+		target.animated_value = value
+	end
+
+
+	self.text_that_changes = ""
+	self.live_text = live_text:new("live_text")
+	self.live_text.target = self
+	self.live_text.update_function = function(target)
+		return target.text_that_changes
+	end
+
+	self.linear_animator = linear_animator:new()
+
+	self.live_number = live_number:new("live_number", self.linear_animator)
+	self.live_number.target = self
+	self.live_number.use_float = true
+	self.live_number.format = "HP: %.2f"
+	self.live_number.update_function = function(target)
+		return target.bar_animated.value
+	end
+
+	self.slideshow = gui_slideshow:new("slideshow", {slides={
+		"slide1","slide2","slide3"
+		},
+	delay=0.5})
+
+	self.gui_text_popup_generator = gui_text_popup_generator:new("text_popup")
+	self.gui_text_popup_generator:pop_text("HELLO WORLD", vmath.vector3(100, 100, 1))
+
+	self.regressive_chronometer = chronometer:new(3580, true)
+	self.regressive_chronometer:resume()
+
+	self.delayed_function = delayed_function:new(0.5, function(target)
+		msg.post(rt_urls.SCREEN_MANAGER, rt_msgs.TOGGLE_LOG)
+		--log.print("DELAYED FUNCTION")
+		self.delayed_function:restart()
+		--msg.post(rt_urls.SCREEN_MANAGER, rt_msgs.POP_SCREEN)
+	end, self, true)
+
+
+	self.test_property = 0
+
+	self.linear_animator:animate(self, "test_property", 100, 6, function(target)
+		pprint("IT WORKSSSS")
+		target.window:close()
+	end)
+
+	self.window = gui_window:new("window")
+	self.window:setup(false)
+	self.window:open()
+
+	self.checkbox = gui_checkbox:new("checkbox")
+	self.checkbox:setup()
+
+	self.queue = queue:new()
+	self.queue:push(1)
+	self.queue:push(2)
+	self.queue:push(5)
+
+	self.stack = stack:new()
+	self.stack:push(1)
+	self.stack:push(2)
+	self.stack:push(5)
+	pprint(self.stack:serialize())
+
+	self.rest_consumer = rest_consumer:new(nil, 3000)
+
+	self.rest_consumer:post("test/object", function(self, id, response)
+		if (response.status ~= 0) then
+			local stack = response.response
+			pprint(stack.__data)
+		else
+			pprint("FAILED TO CONNECT")
+		end
+	end, nil, self.stack)
+
+	msg.post(rt_urls.LEVEL_MANAGER, rt_msgs.PUSH_LEVEL, {level="2_5d_test"})
+
+
+	local equation_solver = simple_equation_solver:new(equations.circle_area)
+	equation_solver:set("r", 3)
+	pprint(equation_solver:result())
+end
+
+function final(self)
+	msg.post(".", defold_msgs.RELEASE_INPUT_FOCUS)
+end
+
+function update(self, dt)
+	self.slideshow:update(dt)
+	self.linear_animator:update(dt)
+	self.window:update(dt)
+	--pprint(self.test_property)
+	--self.regressive_chronometer:update(dt)
+	--pprint(self.regressive_chronometer:get_hours()..":"..self.regressive_chronometer:get_minutes()..":"..self.regressive_chronometer:get_seconds()..":"..self.regressive_chronometer:get_milliseconds())
+
+	self.text_that_changes = "THIS TEXT IS ALIVE "..self.bar.value
+	self.live_text:update(dt)
+	self.live_number:update(dt)
+
+	self.bar:update(dt)
+	self.bar_animated:update(dt)
+	self.draggable_bar:update(dt)
+	self.slider:update(dt)
+
+	self.toggleable_button:update(dt)
+	self.button_reset:update(dt)
+	self.button_add:update(dt)
+	self.button_shake:update(dt)
+end
+
+function on_message(self, message_id, message, sender)
+end
+
+function on_input(self, action_id, action)
+	self.slider:on_input(action_id, action)
+	self.draggable_bar:on_input(action_id, action)
+	self.checkbox:on_input(action_id, action)
+	self.toggleable_button:on_input(action_id, action)
+	self.button_reset:on_input(action_id, action)
+	self.button_add:on_input(action_id, action)
+	self.button_shake:on_input(action_id, action)
+	self.link:on_input(action_id, action)
+	if (action_id == rt_inputs.DEBUG1) then 
+		msg.post(rt_urls.SCREEN_MANAGER, rt_msgs.EXIT_GAME)
+	end
+end
+
+function on_reload(self)
+end

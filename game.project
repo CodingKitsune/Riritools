@@ -1,0 +1,34 @@
+[project]
+title = Riritools
+version = 0.7
+custom_resources = main/json
+
+[bootstrap]
+main_collection = /main/collection/main.collectionc
+render = /riritools/render/render.renderc
+
+[input]
+game_binding = /riritools/input_binding/game.input_bindingc
+repeat_delay = 0.5
+repeat_interval = 0.2
+
+[display]
+width = 1280
+height = 720
+high_dpi = 1
+fullscreen = 0
+display_profiles = /riritools/display_profiles/default.display_profilesc
+
+[physics]
+scale = 0.02
+type = 2D
+
+[script]
+shared_state = 1
+
+[library]
+include_dirs = riritools
+
+[graphics]
+texture_profiles = /builtins/graphics/default.texture_profiles
+

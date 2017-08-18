@@ -1,0 +1,6 @@
+mesh: "/riritools/assets/transition_stencil.dae"
+material: "/riritools/material/transition_stencil.material"
+skeleton: ""
+animations: ""
+default_animation: ""
+name: "unnamed"

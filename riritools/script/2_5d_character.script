@@ -1,0 +1,68 @@
+go.property("MOVE", 0)
+
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local defold_msgs = require("riritools.lua.defold_msgs")
+
+local msg_helper = require("riritools.lua.msg_helper")
+local input_helper = require("riritools.lua.input_helper")
+
+local go_2_5d = require("riritools.lua.go_2_5d")
+
+function init(self)
+	msg.post(".", defold_msgs.ACQUIRE_INPUT_FOCUS)
+
+	self.go_2_5d = go_2_5d:new()
+
+	msg_helper.init(self)
+	input_helper.init(self)
+
+	input_helper.add(self, hash("UP"), function(self, action)
+		if (self.MOVE >= 1) then
+			local pos = go.get_position()
+			pos.y = pos.y + 1
+			go.set_position(pos)
+		end
+	end)
+
+	input_helper.add(self, hash("DOWN"), function(self, action)
+		if (self.MOVE >= 1) then
+			local pos = go.get_position()
+			pos.y = pos.y - 1
+			go.set_position(pos)
+		end
+	end)
+
+	input_helper.add(self, hash("LEFT"), function(self, action)
+		if (self.MOVE >= 1) then
+			local pos = go.get_position()
+			pos.x = pos.x - 1
+			go.set_position(pos)
+		end
+	end)
+
+	input_helper.add(self, hash("RIGHT"), function(self, action)
+		if (self.MOVE >= 1) then
+			local pos = go.get_position()
+			pos.x = pos.x + 1
+			go.set_position(pos)
+		end
+	end)
+
+	if (self.MOVE >= 1) then
+		msg.post("camera", rt_msgs.SET_CAMERA_TARGET)
+	end
+
+
+end
+
+function update(self, dt)
+	self.go_2_5d:update(dt)
+end
+
+function on_message(self, message_id, message, sender)
+	msg_helper.on_message(self, message_id, message, sender)
+end
+
+function on_input(self, action_id, action)
+	input_helper.on_input(self, action_id, action)
+end

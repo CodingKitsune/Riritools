@@ -1,0 +1,68 @@
+local d_msgs = require("riritools.lua.defold_msgs")
+local gui_text_field = require("riritools.lua.gui_text_field")
+local rt_urls = require("riritools.lua.riritools_urls")
+local rt_msgs = require("riritools.lua.riritools_msgs")
+
+local gui_checkbox = require("riritools.lua.gui_checkbox")
+local gui_radiobutton = require("riritools.lua.gui_radiobutton")
+local gui_radiobox = require("riritools.lua.gui_radiobox")
+local gui_container = require("riritools.lua.gui_container")
+local gui_container_example = require("main.lua.gui_container_example")
+local local_player_finder = require("riritools.lua.local_player_finder")
+local log = require("riritools.lua.log")
+
+function init(self)
+	msg.post(".", d_msgs.ACQUIRE_INPUT_FOCUS)
+	msg.post(rt_urls.SCREEN_MANAGER, rt_msgs.TOGGLE_LOG)
+	self.gui_text_field = gui_text_field:new("text_field")
+	self.gui_text_field:setup()
+
+	self.checkbox = gui_checkbox:new("checkbox")
+	self.checkbox:setup()
+
+	self.radiobutton = gui_radiobutton:new("radiobutton")
+	self.radiobutton:setup()
+
+	self.radiobox = gui_radiobox:new("radiobox")
+	self.radiobox:setup({options={"Kit", "Kat", "Kitsune"}, default_value="Kat", box_margin=vmath.vector3(35, 0, 0)})
+	
+	self.container = gui_container_example:new("container")
+	self.container:setup({is_open=true})
+
+	self.log = log
+
+	self.player_finder = local_player_finder:new({
+		on_player_found = function(player, player_list, self)
+			self.log.print("FOUND YOU "..player.data)
+			pprint(player_list)
+			--local new_list = table_utils.make_deep_copy(player_list)
+		end,
+		on_player_found_args = self,
+	})
+	log.print("I AM "..self.player_finder:get_instance_message())
+	--self.gui_text_field.padding = {x=0.3, y=0.5}
+end
+
+function final(self)
+	self.player_finder:close()
+end
+
+function update(self, dt)
+	self.container:update(dt)
+	self.player_finder:update(dt)
+end
+
+function on_message(self, message_id, message, sender)
+		
+end
+
+function on_input(self, action_id, action)
+	self.gui_text_field:on_input(action_id, action)
+	self.checkbox:on_input(action_id, action)
+	self.radiobutton:on_input(action_id, action)
+	self.radiobox:on_input(action_id, action)
+	self.container:on_input(action_id, action)
+end
+
+function on_reload(self)
+end

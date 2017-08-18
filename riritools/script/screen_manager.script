@@ -1,0 +1,374 @@
+local queue = require("riritools.lua.queue")
+local stack = require("riritools.lua.stack")
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local defold_msgs = require("riritools.lua.defold_msgs")
+local msg_helper = require("riritools.lua.msg_helper")
+local proxy_utils = require("riritools.lua.proxy_utils")
+
+local screen_manager_init = rt_msgs.SCREEN_MANAGER_INIT
+
+local is_ready = false
+
+local pairs = pairs
+local post = msg.post
+
+local function get_screen_proxy(screen_name)
+    return "main:/screens#"..screen_name
+end
+
+local function is_screen_loaded(self, screen_name)
+    return self.screens:has_item(screen_name)
+end
+
+local function is_screen_enabled(self, screen_name)
+    screen_name = screen_name or self.screens:top()
+    for key, value in pairs(self.enabled_screens) do
+        if (key == screen_name) then
+            return (value == true)
+        end
+    end
+    return false
+end
+
+local function is_screen_paused(self, screen_name)
+    screen_name = screen_name or self.screens:top()
+    for key, value in pairs(self.paused_screens) do
+        if (key == screen_name) then
+            return (value == 0)
+        end
+    end
+    return false
+end
+
+local function init_screen_manager(self)
+    self.can_proceed = true
+    self.todo = queue:new()
+    self.screens = stack:new()
+    self.enabled_screens = {}
+    self.paused_sceens = {}
+    self.screen_time_steps = {}
+    self.loading_screen = false
+    self.loading_screen_parameters = false
+    self.reply_to = false
+    self.warn_changes_to = {}
+
+    msg_helper.init(self)
+
+    msg_helper.add(self, rt_msgs.PUSH_SCREEN, function(self, message, sender)
+      local params = {
+            screen = message.screen,
+            params=message.params,
+        }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (not is_screen_loaded(self, params.screen)) then
+                post(get_screen_proxy(params.screen), defold_msgs.ASYNC_LOAD)
+                self.loading_screen = params.screen
+                self.loading_screen_parameters = params.params
+                self.reply_to = params.reply_to
+            else
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+
+    msg_helper.add(self, defold_msgs.PROXY_LOADED, function(self, _, sender)
+        post(sender, defold_msgs.ENABLE)
+        post(sender, defold_msgs.ACQUIRE_INPUT_FOCUS)
+        if (self.reply_to) then
+            post(self.reply_to, rt_msgs.PUSHED_SCREEN, {screen=self.loading_screen})
+        end
+        for key, value in pairs(self.warn_changes_to) do
+            if (value) then
+                post(key, rt_msgs.PUSHED_SCREEN, {screen=self.loading_screen})
+            end
+        end
+        if (self.loading_screen_parameters) then
+            local screen = self.loading_screen..":/gui#gui"
+            post(screen, rt_msgs.GOT_SCREEN_PARAMETERS, self.loading_screen_parameters)
+        end
+
+        self.enabled_screens[self.loading_screen] = true
+        self.screen_time_steps[self.loading_screen] = {1.0, 0}
+
+        post(sender, defold_msgs.SET_TIME_STEP, {
+            factor=self.screen_time_steps[self.loading_screen][1],
+            mode=self.screen_time_steps[self.loading_screen][2]
+        })
+
+        self.screens:push(self.loading_screen)
+        self.loading_screen = nil
+        self.loading_screen_parameters = nil
+        self.can_proceed = true
+    end)
+    
+    msg_helper.add(self, rt_msgs.POP_SCREEN, function(self, message, sender)
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (self.screens:size() > 0) then
+                self.enabled_screens[self.screens:top()] = nil
+                self.screen_time_steps[self.screens:top()] = nil
+                post(get_screen_proxy(self.screens:top()), defold_msgs.UNLOAD)
+            end
+            self.reply_to = params.reply_to
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.POP_ALL_SCREENS, function(self, message, sender)
+       for _, screen in pairs(self.screens:get_raw_data()) do
+            if (screen) then
+                self.messages[rt_msgs.POP_SCREEN](self, {}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                post(params.reply_to, rt_msgs.POPPED_ALL_SCREENS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    post(key, rt_msgs.POPPED_ALL_SCREENS)
+                end
+            end
+            self.can_proceed = true
+        end, params})
+    end)
+    
+    msg_helper.add(self, defold_msgs.PROXY_UNLOADED, function(self, message, sender)
+        local screen = self.screens:top()
+        self.screens:pop()
+        if (self.reply_to) then
+            post(self.reply_to, rt_msgs.POPPED_SCREEN, {screen=screen})
+        end
+        for key, value in pairs(self.warn_changes_to) do
+            if (value) then
+                post(key, rt_msgs.POPPED_SCREEN, {screen=screen})
+            end
+        end    
+        self.can_proceed = true
+        collectgarbage("step", 1)
+    end)
+    
+    msg_helper.add(self, rt_msgs.ENABLE_SCREEN, function(self, message, sender)
+        local params = { screen = message.screen }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (is_screen_loaded(self, params.screen) and not is_screen_enabled(self, params.screen)) then
+                post(get_screen_proxy(params.screen), defold_msgs.ENABLE)
+                self.enabled_screens[params.screen] = true
+                if (params.reply_to) then
+                    post(params.reply_to, rt_msgs.ENABLED_SCREEN, {screen=params.screen})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        post(key, rt_msgs.ENABLED_SCREEN, {screen=params.screen})
+                    end
+                end         
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.DISABLE_SCREEN, function(self, message, sender)
+        local params = {screen=message.screen}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (is_screen_loaded(self, params.screen) and is_screen_enabled(self, params.screen)) then
+                post(get_screen_proxy(params.screen), defold_msgs.DISABLE)
+                self.enabled_screens[params.screen] = false
+                if (params.reply_to) then
+                    post(params.reply_to, rt_msgs.DISABLED_SCREEN, {screen=params.screen})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        post(key, rt_msgs.DISABLED_SCREEN, {screen=params.screen})
+                    end
+                end 
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.PAUSE_SCREEN, function(self, message, sender)
+        local params = { screen=message.screen or self.screens:top() }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)          
+            if (is_screen_loaded(self, params.screen) and is_screen_enabled(self, params.screen)) then
+                post(get_screen_proxy(params.screen), defold_msgs.SET_TIME_STEP, {
+                    factor=0.0000000000001,
+                    mode=self.screen_time_steps[params.screen][2]
+                })
+                if (params.reply_to) then
+                    post(params.reply_to, rt_msgs.PAUSED_SCREEN, {screen=params.screen})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        post(key, rt_msgs.PAUSED_SCREEN, {screen=params.screen})
+                    end
+                end 
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.PAUSE_ALL_SCREENS, function(self, message, sender)
+        for _, screen in pairs(self.screens:get_raw_data()) do
+            if (screen) then
+                self.messages[rt_msgs.PAUSE_SCREEN](self, {screen=screen}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                post(params.reply_to, rt_msgs.PAUSED_ALL_SCREENS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    post(key, rt_msgs.PAUSED_ALL_SCREENS)
+                end
+            end 
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.RESUME_SCREEN, function(self, message, sender)
+        local params = { screen=message.screen or self.screens:top() }
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (is_screen_loaded(self, params.screen) and is_screen_enabled(self, params.screen)) then
+                post(get_screen_proxy(params.screen), defold_msgs.SET_TIME_STEP, {
+                    factor=self.screen_time_steps[params.screen][1],
+                    mode=self.screen_time_steps[params.screen][2]
+                })
+                if (params.reply_to) then
+                    post(params.reply_to, rt_msgs.RESUMED_SCREEN, {screen=params.screen})
+                end
+                for key, value in pairs(self.warn_changes_to) do
+                    if (value) then
+                        post(key, rt_msgs.RESUMED_SCREEN, {screen=params.screen})
+                    end
+                end 
+                self.can_proceed = true
+            end
+        end, params})
+    end)
+    
+    msg_helper.add(self, rt_msgs.RESUME_ALL_SCREENS, function(self)
+        for _, screen in pairs(self.screens:get_raw_data()) do
+            if (screen) then
+                self.messages[rt_msgs.RESUME_SCREEN](self, {screen=screen}, sender)
+            end
+        end
+        local params = {}
+        if (message.reply or message.reply_to) then
+            params.reply_to = message.reply_to or sender
+        end
+        self.todo:push({function(self, params)
+            if (params.reply_to) then
+                post(params.reply_to, rt_msgs.RESUMED_ALL_SCREENS)
+            end
+            for key, value in pairs(self.warn_changes_to) do
+                if (value) then
+                    post(key, rt_msgs.RESUMED_ALL_SCREENS)
+                end
+            end 
+        end, params})
+    end)
+
+    msg_helper.add(self, rt_msgs.SET_SCREEN_TIME_STEP, function(self, message)
+        local params_to_send = { screen = message.screen or self.screens:top() }
+        self.todo:push({function(self, params)
+            if (is_screen_loaded(self, params.screen) and is_screen_enabled(self, params.screen)) then
+                self.screen_time_steps[params.screen][1] = params.frequency
+                self.screen_time_steps[params.screen][2] = params.mode
+                post(get_screen_proxy(params.screen), defold_msgs.SET_TIME_STEP, {
+                    factor=self.screen_time_steps[params.screen][1],
+                    mode=self.screen_time_steps[params.screen][2]
+                })
+                self.can_proceed = true
+            end
+        end, params_to_send})
+    end)
+
+    msg_helper.add(self, rt_msgs.GET_SCREEN_TIME_STEP, function(self, message, sender)
+        local screen = message.screen or self.screens:top()
+        if (is_screen_loaded(self, screen) and is_screen_enabled(self, screen)) then
+            local time_step = {
+                factor=self.screen_time_steps[screen][1],
+                mode=self.screen_time_steps[screen][2],
+            }
+            post(sender, rt_msgs.GOT_SCREEN_TIME_STEP, {screen=screen, time_step=time_step})
+        end
+    end)
+
+    msg_helper.add(self, rt_msgs.GET_ACTIVE_SCREENS, function(self, _, sender)
+        post(sender, rt_msgs.GOT_ACTIVE_SCREENS, {screens=self.screens.get_raw_data()})
+    end)
+
+    msg_helper.add(self, rt_msgs.WARN_SCREEN_CHANGES, function(self, _, sender)
+        self.warn_changes_to[sender] = true
+    end)
+
+    msg_helper.add(self, rt_msgs.EXIT_GAME, function(self)
+        post("@system:", defold_msgs.EXIT, {code=0})
+    end)
+
+    msg_helper.add(self, defold_msgs.REBOOT, function(self)
+        post("@system:", defold_msgs.REBOOT)
+    end)
+
+    msg_helper.add(self, defold_msgs.TOGGLE_PHYSICS_DEBUG, function(self)
+        post("@system:", defold_msgs.TOGGLE_PHYSICS_DEBUG)
+    end)
+
+    msg_helper.add(self, defold_msgs.TOGGLE_PROFILE, function(self)
+        post("@system:", defold_msgs.TOGGLE_PROFILE)
+    end)
+
+    msg_helper.add(self, rt_msgs.TOGGLE_LOG, function(self)
+        post("gui#gui", rt_msgs.TOGGLE_LOG)
+    end)
+
+    window.set_dim_mode(window.DIMMING_OFF)
+end
+
+function update(self)
+    if (not is_ready) then
+        return
+    end
+    if (self.can_proceed and self.todo:size() > 0) then
+        local func_todo = self.todo:pop()
+        self.can_proceed = false
+        func_todo[1](self, func_todo[2])
+    end
+end
+
+function on_message(self, message_id, message, sender)
+    if (message_id == screen_manager_init) then
+        is_ready = true
+        init_screen_manager(self)
+        post(sender, rt_msgs.SCREEN_MANAGER_INIT_DONE)
+    end
+    if (not is_ready) then
+        return
+    end
+    msg_helper.on_message(self, message_id, message, sender)
+end

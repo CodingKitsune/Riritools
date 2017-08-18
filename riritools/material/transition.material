@@ -1,0 +1,4 @@
+name: "transition"
+tags: "transition"
+vertex_program: "/riritools/material/transition.vp"
+fragment_program: "/riritools/material/transition.fp"

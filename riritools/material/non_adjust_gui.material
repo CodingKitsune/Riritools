@@ -1,0 +1,8 @@
+name: "non_adjust_gui"
+tags: "non_adjust_gui"
+vertex_program: "/builtins/materials/gui.vp"
+fragment_program: "/builtins/materials/gui.fp"
+vertex_constants {
+  name: "view_proj"
+  type: CONSTANT_TYPE_VIEWPROJ
+}

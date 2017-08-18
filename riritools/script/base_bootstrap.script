@@ -1,0 +1,37 @@
+local bootstrap = require("riritools.lua.bootstrap")
+local warnings = require("riritools.lua.warnings")
+
+local gui_component = require("riritools.lua.gui_component")
+
+function init(self)
+
+	--require("main.config")
+
+	--NEEDEDED LINE
+	
+	--require("main.requires")
+
+	--CUSTOM LINE
+	--[[	
+	rt.save_file_manager.schema = {
+	
+	}
+	
+	--CUSTOM LINE
+	rt.config_file_manager.schema = {
+		"se_volume",
+		"bgm_volume",
+		"me_volume",
+		"bgs_volum"
+	}
+
+	--]]
+	gui_component.static.global_dictionary:load("/main/json/english_menu.json")
+
+	
+	bootstrap.init(self, "screen_gui_examples_2")
+end
+
+function on_message(self, message_id, message, sender)
+	bootstrap.on_message(self, message_id, message, sender)
+end

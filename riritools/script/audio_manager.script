@@ -1,0 +1,25 @@
+local msg_helper = require("riritools.lua.msg_helper")
+local defold_msgs = require("riritools.lua.defold_msgs")
+
+function init(self)
+
+	msg_helper.init(self)
+
+	
+	msg_helper.add(self, defold_msgs.PLAY_SOUND, function(self, message, sender)
+		if (type(message.sound) == "string") then
+		
+		end
+	end)
+	
+	msg_helper.add(self, defold_msgs.STOP_SOUND, function(self, message, sender)
+		if (type(message.sound) == "string") then
+		
+		end
+	end)
+	
+end
+
+function on_message(self, message_id, message, sender)
+	msg_helper.on_message(self, message_id, message, sender)
+end

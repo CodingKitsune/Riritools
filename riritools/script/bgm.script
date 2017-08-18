@@ -1,0 +1,48 @@
+go.property("volume", 1.0)
+go.property("auto_play", 1)
+
+local rt_urls = require("riritools.lua.riritools_urls")
+local rt_msgs = require("riritools.lua.riritools_msgs")
+local defold_msgs = require("riritools.lua.defold_msgs")
+
+local get_config_field = rt_msgs.GET_CONFIG_FIELD
+local got_config_field = rt_msgs.GOT_CONFIG_FIELD
+local changed_config_field = rt_msgs.CHANGED_CONFIG_FIELD
+local rt_play_sound = rt_msgs.PLAY_SOUND
+local rt_stop_sound = rt_msgs.STOP_SOUND
+local play_sound = defold_msgs.PLAY_SOUND
+local stop_sound = defold_msgs.STOP_SOUND
+local set_gain = defold_msgs.SET_GAIN
+
+local player
+
+local post = msg.post
+
+function init(self)
+	player = player or rt_urls.GO_PLAYER
+	msg.post(player, rt_msgs.SET_WARN_CHANGE_CONFIG_FIELD, {field = "bgm_volume", value = true})
+	if (self.auto_play == 1) then
+		post(player, rt_msgs.GET_CONFIG_FIELD, {field="bgm_volume"})
+	end
+	self.__sound = msg.url("#sound")
+	self.__playing = false
+end
+
+function on_message(self, message_id, message)
+	if (message_id == got_config_field and not self.__playing) then
+		self.__playing = true
+		post(self.__sound, play_sound, {gain = message.value * self.volume})
+	elseif (message_id == rt_play_sound) then
+		post(player, get_config_field, {field = "bgm_volume"})
+	elseif (message_id == changed_config_field) then
+		post(self.__sound, set_gain, {gain = message.value * self.volume})
+	elseif (message_id == rt_stop_sound) then
+		self.__playing = false
+		post(self.__sound, stop_sound)
+	end
+end
+
+function final(self)
+	post(self.__sound, stop_sound)
+	post(player, rt_msgs.SET_WARN_CHANGE_CONFIG_FIELD, {field = "bgm_volume", value = false})
+end
