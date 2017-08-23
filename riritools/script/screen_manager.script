@@ -41,6 +41,9 @@ local function is_screen_paused(self, screen_name)
 end
 
 local function init_screen_manager(self)
+
+    post("main:/screens", hash("acquire_input_focus"))
+
     self.can_proceed = true
     self.todo = queue:new()
     self.screens = stack:new()
@@ -76,7 +79,6 @@ local function init_screen_manager(self)
 
     msg_helper.add(self, defold_msgs.PROXY_LOADED, function(self, _, sender)
         post(sender, defold_msgs.ENABLE)
-        post(sender, defold_msgs.ACQUIRE_INPUT_FOCUS)
         if (self.reply_to) then
             post(self.reply_to, rt_msgs.PUSHED_SCREEN, {screen=self.loading_screen})
         end
@@ -103,7 +105,7 @@ local function init_screen_manager(self)
         self.loading_screen_parameters = nil
         self.can_proceed = true
     end)
-    
+
     msg_helper.add(self, rt_msgs.POP_SCREEN, function(self, message, sender)
         local params = {}
         if (message.reply or message.reply_to) then
@@ -118,7 +120,7 @@ local function init_screen_manager(self)
             self.reply_to = params.reply_to
         end, params})
     end)
-    
+
     msg_helper.add(self, rt_msgs.POP_ALL_SCREENS, function(self, message, sender)
        for _, screen in pairs(self.screens:get_raw_data()) do
             if (screen) then
@@ -141,7 +143,7 @@ local function init_screen_manager(self)
             self.can_proceed = true
         end, params})
     end)
-    
+
     msg_helper.add(self, defold_msgs.PROXY_UNLOADED, function(self, message, sender)
         local screen = self.screens:top()
         self.screens:pop()
@@ -152,11 +154,11 @@ local function init_screen_manager(self)
             if (value) then
                 post(key, rt_msgs.POPPED_SCREEN, {screen=screen})
             end
-        end    
+        end
         self.can_proceed = true
         collectgarbage("step", 1)
     end)
-    
+
     msg_helper.add(self, rt_msgs.ENABLE_SCREEN, function(self, message, sender)
         local params = { screen = message.screen }
         if (message.reply or message.reply_to) then
@@ -173,12 +175,12 @@ local function init_screen_manager(self)
                     if (value) then
                         post(key, rt_msgs.ENABLED_SCREEN, {screen=params.screen})
                     end
-                end         
+                end
                 self.can_proceed = true
             end
         end, params})
     end)
-    
+
     msg_helper.add(self, rt_msgs.DISABLE_SCREEN, function(self, message, sender)
         local params = {screen=message.screen}
         if (message.reply or message.reply_to) then
@@ -195,18 +197,18 @@ local function init_screen_manager(self)
                     if (value) then
                         post(key, rt_msgs.DISABLED_SCREEN, {screen=params.screen})
                     end
-                end 
+                end
                 self.can_proceed = true
             end
         end, params})
     end)
-    
+
     msg_helper.add(self, rt_msgs.PAUSE_SCREEN, function(self, message, sender)
         local params = { screen=message.screen or self.screens:top() }
         if (message.reply or message.reply_to) then
             params.reply_to = message.reply_to or sender
         end
-        self.todo:push({function(self, params)          
+        self.todo:push({function(self, params)
             if (is_screen_loaded(self, params.screen) and is_screen_enabled(self, params.screen)) then
                 post(get_screen_proxy(params.screen), defold_msgs.SET_TIME_STEP, {
                     factor=0.0000000000001,
@@ -219,12 +221,12 @@ local function init_screen_manager(self)
                     if (value) then
                         post(key, rt_msgs.PAUSED_SCREEN, {screen=params.screen})
                     end
-                end 
+                end
                 self.can_proceed = true
             end
         end, params})
     end)
-    
+
     msg_helper.add(self, rt_msgs.PAUSE_ALL_SCREENS, function(self, message, sender)
         for _, screen in pairs(self.screens:get_raw_data()) do
             if (screen) then
@@ -243,10 +245,10 @@ local function init_screen_manager(self)
                 if (value) then
                     post(key, rt_msgs.PAUSED_ALL_SCREENS)
                 end
-            end 
+            end
         end, params})
     end)
-    
+
     msg_helper.add(self, rt_msgs.RESUME_SCREEN, function(self, message, sender)
         local params = { screen=message.screen or self.screens:top() }
         if (message.reply or message.reply_to) then
@@ -265,12 +267,12 @@ local function init_screen_manager(self)
                     if (value) then
                         post(key, rt_msgs.RESUMED_SCREEN, {screen=params.screen})
                     end
-                end 
+                end
                 self.can_proceed = true
             end
         end, params})
     end)
-    
+
     msg_helper.add(self, rt_msgs.RESUME_ALL_SCREENS, function(self)
         for _, screen in pairs(self.screens:get_raw_data()) do
             if (screen) then
@@ -289,7 +291,7 @@ local function init_screen_manager(self)
                 if (value) then
                     post(key, rt_msgs.RESUMED_ALL_SCREENS)
                 end
-            end 
+            end
         end, params})
     end)
 
