@@ -278,8 +278,8 @@ local function order(self)
     local object, properties, property, property_type, value, value_string, last_value, c, d, tolerance, send_string
     for k=1, #objects do
         object = objects[k]
-        properties = types[object[2]][1]
         if (object) then
+            properties = types[object[2]][1]
             for i=1, #properties do
                 property = properties[i]
                 value = property.get(object[1])
