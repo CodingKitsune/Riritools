@@ -3,7 +3,6 @@ local stack = require("riritools.lua.stack")
 local rt_msgs = require("riritools.lua.riritools_msgs")
 local defold_msgs = require("riritools.lua.defold_msgs")
 local msg_helper = require("riritools.lua.msg_helper")
-local proxy_utils = require("riritools.lua.proxy_utils")
 
 local screen_manager_init = rt_msgs.SCREEN_MANAGER_INIT
 
@@ -11,6 +10,7 @@ local is_ready = false
 
 local pairs = pairs
 local post = msg.post
+local pushed_screen = rt_msgs.PUSHED_SCREEN
 
 local function get_screen_proxy(screen_name)
     return "main:/screens#"..screen_name
@@ -22,22 +22,7 @@ end
 
 local function is_screen_enabled(self, screen_name)
     screen_name = screen_name or self.screens:top()
-    for key, value in pairs(self.enabled_screens) do
-        if (key == screen_name) then
-            return (value == true)
-        end
-    end
-    return false
-end
-
-local function is_screen_paused(self, screen_name)
-    screen_name = screen_name or self.screens:top()
-    for key, value in pairs(self.paused_screens) do
-        if (key == screen_name) then
-            return (value == 0)
-        end
-    end
-    return false
+    return (self.enabled_screens[screen_name] == true)
 end
 
 local function init_screen_manager(self)
@@ -79,12 +64,13 @@ local function init_screen_manager(self)
 
     msg_helper.add(self, defold_msgs.PROXY_LOADED, function(self, _, sender)
         post(sender, defold_msgs.ENABLE)
+        local warning = {screen=self.loading_screen}
         if (self.reply_to) then
-            post(self.reply_to, rt_msgs.PUSHED_SCREEN, {screen=self.loading_screen})
+            post(self.reply_to, pushed_screen, warning)
         end
         for key, value in pairs(self.warn_changes_to) do
             if (value) then
-                post(key, rt_msgs.PUSHED_SCREEN, {screen=self.loading_screen})
+                post(key, pushed_screen, warning)
             end
         end
         if (self.loading_screen_parameters) then
@@ -144,19 +130,20 @@ local function init_screen_manager(self)
         end, params_to_send})
     end)
 
-    msg_helper.add(self, defold_msgs.PROXY_UNLOADED, function(self, message, sender)
+    msg_helper.add(self, defold_msgs.PROXY_UNLOADED, function(self)
         local screen = self.screens:top()
         self.screens:pop()
+        local warning = {screen=screen}
         if (self.reply_to) then
-            post(self.reply_to, rt_msgs.POPPED_SCREEN, {screen=screen})
+            post(self.reply_to, rt_msgs.POPPED_SCREEN, warning)
         end
         for key, value in pairs(self.warn_changes_to) do
             if (value) then
-                post(key, rt_msgs.POPPED_SCREEN, {screen=screen})
+                post(key, rt_msgs.POPPED_SCREEN, warning)
             end
         end
-        self.can_proceed = true
         collectgarbage("step", 1)
+        self.can_proceed = true
     end)
 
     msg_helper.add(self, rt_msgs.ENABLE_SCREEN, function(self, message, sender)
@@ -168,16 +155,17 @@ local function init_screen_manager(self)
             if (is_screen_loaded(self, params.screen) and not is_screen_enabled(self, params.screen)) then
                 post(get_screen_proxy(params.screen), defold_msgs.ENABLE)
                 self.enabled_screens[params.screen] = true
+                local warning = {screen=params.screen}
                 if (params.reply_to) then
-                    post(params.reply_to, rt_msgs.ENABLED_SCREEN, {screen=params.screen})
+                    post(params.reply_to, rt_msgs.ENABLED_SCREEN, warning)
                 end
                 for key, value in pairs(self.warn_changes_to) do
                     if (value) then
-                        post(key, rt_msgs.ENABLED_SCREEN, {screen=params.screen})
+                        post(key, rt_msgs.ENABLED_SCREEN, warning)
                     end
                 end
-                self.can_proceed = true
             end
+            self.can_proceed = true
         end, params_to_send})
     end)
 
@@ -190,16 +178,17 @@ local function init_screen_manager(self)
             if (is_screen_loaded(self, params.screen) and is_screen_enabled(self, params.screen)) then
                 post(get_screen_proxy(params.screen), defold_msgs.DISABLE)
                 self.enabled_screens[params.screen] = false
+                local warning = {screen=params.screen}
                 if (params.reply_to) then
-                    post(params.reply_to, rt_msgs.DISABLED_SCREEN, {screen=params.screen})
+                    post(params.reply_to, rt_msgs.DISABLED_SCREEN, warning)
                 end
                 for key, value in pairs(self.warn_changes_to) do
                     if (value) then
-                        post(key, rt_msgs.DISABLED_SCREEN, {screen=params.screen})
+                        post(key, rt_msgs.DISABLED_SCREEN, warning)
                     end
                 end
-                self.can_proceed = true
             end
+            self.can_proceed = true
         end, params_to_send})
     end)
 
@@ -214,16 +203,17 @@ local function init_screen_manager(self)
                     factor=0.0000000000001,
                     mode=self.screen_time_steps[params.screen][2]
                 })
+                local warning = {screen=params.screen}
                 if (params.reply_to) then
-                    post(params.reply_to, rt_msgs.PAUSED_SCREEN, {screen=params.screen})
+                    post(params.reply_to, rt_msgs.PAUSED_SCREEN, warning)
                 end
                 for key, value in pairs(self.warn_changes_to) do
                     if (value) then
-                        post(key, rt_msgs.PAUSED_SCREEN, {screen=params.screen})
+                        post(key, rt_msgs.PAUSED_SCREEN, warning)
                     end
                 end
-                self.can_proceed = true
             end
+            self.can_proceed = true
         end, params_to_send})
     end)
 
@@ -260,16 +250,17 @@ local function init_screen_manager(self)
                     factor=self.screen_time_steps[params.screen][1],
                     mode=self.screen_time_steps[params.screen][2]
                 })
+                local warning = {screen=params.screen}
                 if (params.reply_to) then
-                    post(params.reply_to, rt_msgs.RESUMED_SCREEN, {screen=params.screen})
+                    post(params.reply_to, rt_msgs.RESUMED_SCREEN, warning)
                 end
                 for key, value in pairs(self.warn_changes_to) do
                     if (value) then
-                        post(key, rt_msgs.RESUMED_SCREEN, {screen=params.screen})
+                        post(key, rt_msgs.RESUMED_SCREEN, warning)
                     end
                 end
-                self.can_proceed = true
             end
+            self.can_proceed = true
         end, params_to_send})
     end)
 
@@ -305,8 +296,8 @@ local function init_screen_manager(self)
                     factor=self.screen_time_steps[params.screen][1],
                     mode=self.screen_time_steps[params.screen][2]
                 })
-                self.can_proceed = true
             end
+            self.can_proceed = true
         end, params_to_send})
     end)
 
