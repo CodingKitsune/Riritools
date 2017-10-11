@@ -1,7 +1,7 @@
 name: "tile_map"
 tags: "tile"
-vertex_program: "/main/material/high_performance_tile_map.vp"
-fragment_program: "/main/material/high_performance_tile_map.fp"
+vertex_program: "/riritools/material/high_performance_tile_map.vp"
+fragment_program: "/riritools/material/high_performance_tile_map.fp"
 vertex_constants {
   name: "view_proj"
   type: CONSTANT_TYPE_VIEWPROJ
