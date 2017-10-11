@@ -1,0 +1,14 @@
+go.property("time", vmath.vector4(0, 0.6251, 0.2, 0))
+
+local set_constant = sprite.set_constant
+
+function init(self)
+	self._bg = msg.url("#bg")
+	set_constant(self._bg, "time", self.time)
+end
+
+function update(self, dt)
+	local time = self.time
+	time.x = (time.x + dt*time.z) % time.y
+	set_constant(self._bg, "time", time)
+end

@@ -1,0 +1,12 @@
+name: "background"
+tags: "background"
+vertex_program: "/riritools/material/basic_parallax.vp"
+fragment_program: "/riritools/material/basic_parallax.fp"
+vertex_constants {
+  name: "view_proj"
+  type: CONSTANT_TYPE_VIEWPROJ
+}
+fragment_constants {
+  name: "time"
+  type: CONSTANT_TYPE_USER
+}

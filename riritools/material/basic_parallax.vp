@@ -1,0 +1,12 @@
+uniform lowp mat4 view_proj;
+
+attribute lowp vec4 position;
+attribute lowp vec2 texcoord0;
+
+varying lowp vec2 var_texcoord0;
+
+void main()
+{
+    gl_Position = view_proj * vec4(position.xyz, 1.0);
+    var_texcoord0 = texcoord0;
+}
