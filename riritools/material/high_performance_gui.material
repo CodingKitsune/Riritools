@@ -1,7 +1,7 @@
 name: "gui"
 tags: "gui"
-vertex_program: "/riritools/materials/high_performance_gui.vp"
-fragment_program: "/riritools/materials/high_performance_gui.fp"
+vertex_program: "/riritools/material/high_performance_gui.vp"
+fragment_program: "/riritools/material/high_performance_gui.fp"
 vertex_constants {
   name: "view_proj"
   type: CONSTANT_TYPE_VIEWPROJ
