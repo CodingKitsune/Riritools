@@ -1,0 +1,8 @@
+name: "font"
+tags: "gui"
+vertex_program: "/riritools/material/high_performance_font.vp"
+fragment_program: "/riritools/material/high_performance_font.fp"
+vertex_constants {
+  name: "view_proj"
+  type: CONSTANT_TYPE_VIEWPROJ
+}
