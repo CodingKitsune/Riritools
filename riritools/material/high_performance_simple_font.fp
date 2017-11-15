@@ -6,6 +6,5 @@ uniform lowp sampler2D texture;
 
 void main()
 {
-    lowp vec2 t = texture2D(texture, var_texcoord0.xy).xy;
-    gl_FragColor = vec4(var_face_color.xyz, 1.0);
+    gl_FragColor = vec4(var_face_color.xyz, 1.0) * texture2D(texture, var_texcoord0.xy).x * var_face_color.w;
 }
